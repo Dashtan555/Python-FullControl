@@ -1,9 +1,14 @@
 import fullcontrol as fc
+
+# Creacion de un cilindro
+
 # create a basic simple geometry (a cylinder) that will be modified retrospectively
 centre = fc.Point(x=50, y=50, z=0)
 steps = fc.helixZ(centre, start_radius=10, end_radius=10, start_angle=0, n_turns=50, pitch_z=0.167, segments=50*64)
 steps.append(fc.PlotAnnotation(point = fc.Point(x=50, y=50, z=10), label='original geometry'))
 fc.transform(steps, 'plot', fc.PlotControls(color_type='print_sequence', zoom=0.7))
+
+# Deformacion del cilindro.
 
 # 'post-process' the geometry to change it
 z_max = 25
