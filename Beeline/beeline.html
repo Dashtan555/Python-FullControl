@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beeline Control</title>
+  <style>
+    body {
+      background: #111;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 { color: #00ffff; margin-bottom: 5px; }
+    #estado {
+      color: #aaa;
+      margin-bottom: 20px;
+      font-size: 15px;
+    }
+    #estado.conectado { color: #00ff00; }
+    button {
+      background: #1a1a2e;
+      color: #00ffff;
+      border: 2px solid #00ffff;
+      border-radius: 12px;
+      padding: 15px 25px;
+      font-size: 18px;
+      margin: 8px;
+      cursor: pointer;
+      width: 200px;
+      transition: all 0.2s;
+    }
+    button:active { background: #00ffff; color: #000; }
+    button:disabled { opacity: 0.3; border-color: #555; color: #555; }
+    #btnConectar {
+      background: #00ffff;
+      color: #000;
+      font-weight: bold;
+      width: 220px;
+    }
+    #btnConectar.conectado {
+      background: #ff4444;
+      color: #fff;
+      border-color: #ff4444;
+    }
+    .flechas {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .vacio { visibility: hidden; }
+  </style>
+</head>
+<body>
+  <h1>🧭 BEELINE</h1>
+  <div id="estado">Desconectado</div>
+
+  <button id="btnConectar" onclick="conectar()">
+    Conectar BLE
+  </button>
+
+  <br>
+
+  <div class="flechas">
+    <div class="vacio"></div>
+    <button onclick="enviar('N')"  disabled id="btn_N">⬆️ Recto</button>
+    <div class="vacio"></div>
+
+    <button onclick="enviar('O')"  disabled id="btn_O">⬅️ Izquierda</button>
+    <button onclick="enviar('NE')" disabled id="btn_NE">↗️ Leve Der</button>
+    <button onclick="enviar('E')"  disabled id="btn_E">➡️ Derecha</button>
+
+    <div class="vacio"></div>
+    <button onclick="enviar('SE')" disabled id="btn_SE">↙️ Leve Izq</button>
+    <div class="vacio"></div>
+
+    <div class="vacio"></div>
+    <button onclick="enviar('S')"  disabled id="btn_S">🔄 Regresa</button>
+    <div class="vacio"></div>
+  </div>
+
+  <script>
+    const SERVICE_UUID        = '12345678-1234-1234-1234-123456789abc';
+    const CHARACTERISTIC_UUID = 'abcd1234-ab12-ab12-ab12-abcdef123456';
+
+    let device, characteristic;
+    const botones = ['N','NE','E','SE','S','O'];
+
+    function setEstado(texto, conectado) {
+      const el = document.getElementById('estado');
+      el.textContent = texto;
+      el.className = conectado ? 'conectado' : '';
+      const btn = document.getElementById('btnConectar');
+      btn.textContent = conectado ? 'Desconectar' : 'Conectar BLE';
+      btn.className = conectado ? 'conectado' : '';
+      botones.forEach(id => {
+        document.getElementById('btn_' + id).disabled = !conectado;
+      });
+    }
+
+    async function conectar() {
+      if (device && device.gatt.connected) {
+        device.gatt.disconnect();
+        setEstado('Desconectado', false);
+        return;
+      }
+      try {
+        setEstado('Buscando...', false);
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: 'BEELINE-ESP32' }],
+          optionalServices: [SERVICE_UUID]
+        });
+        device.addEventListener('gattserverdisconnected', () => {
+          setEstado('Desconectado', false);
+        });
+        const server  = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+        setEstado('✅ Conectado a BEELINE-ESP32', true);
+      } catch (e) {
+        setEstado('Error: ' + e.message, false);
+      }
+    }
+
+    async function enviar(comando) {
+      if (!characteristic) return;
+      try {
+        const encoder = new TextEncoder();
+        await characteristic.writeValue(encoder.encode(comando));
+        console.log('Enviado:', comando);
+      } catch (e) {
+        setEstado('Error al enviar: ' + e.message, false);
+      }
+    }
+  </script>
+</body>
+</html>

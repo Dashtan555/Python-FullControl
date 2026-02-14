@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beeline</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #111;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      min-height: 100vh;
+    }
+    h1 { color: #00ffff; font-size: 24px; margin-bottom: 4px; }
+    #estado {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 12px;
+    }
+    #estado.conectado { color: #00ff00; }
+    #estado.error     { color: #ff4444; }
+
+    /* Botón conectar */
+    #btnConectar {
+      background: #00ffff;
+      color: #000;
+      border: none;
+      border-radius: 12px;
+      padding: 12px 30px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-bottom: 16px;
+      width: 200px;
+    }
+    #btnConectar.conectado {
+      background: #ff4444;
+      color: #fff;
+    }
+
+    /* Panel GPS */
+    #panelGPS {
+      background: #1a1a2e;
+      border: 1px solid #00ffff44;
+      border-radius: 16px;
+      padding: 16px;
+      width: 100%;
+      max-width: 360px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    #panelGPS.visible { display: block; }
+
+    .dato {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #333;
+      font-size: 15px;
+    }
+    .dato:last-child { border-bottom: none; }
+    .dato label { color: #888; }
+    .dato span  { color: #00ffff; font-weight: bold; font-size: 18px; }
+
+    /* Botones manuales */
+    .titulo-seccion {
+      color: #888;
+      font-size: 12px;
+      margin: 12px 0 8px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .grid-flechas {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .btn-flecha {
+      background: #1a1a2e;
+      color: #00ffff;
+      border: 1px solid #00ffff44;
+      border-radius: 10px;
+      padding: 14px 8px;
+      font-size: 22px;
+      cursor: pointer;
+    }
+    .btn-flecha:active { background: #00ffff22; }
+    .btn-flecha:disabled { opacity: 0.3; }
+    .vacio { visibility: hidden; }
+
+    /* Toggle GPS */
+    #btnGPS {
+      background: #1a1a2e;
+      color: #00ffff;
+      border: 2px solid #00ffff;
+      border-radius: 12px;
+      padding: 10px 20px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-bottom: 12px;
+      width: 200px;
+    }
+    #btnGPS.activo {
+      background: #00ffff;
+      color: #000;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧭 BEELINE</h1>
+  <div id="estado">Desconectado</div>
+
+  <button id="btnConectar" onclick="conectar()">Conectar BLE</button>
+
+  <button id="btnGPS" onclick="toggleGPS()" disabled>
+    📍 Activar GPS
+  </button>
+
+  <!-- Panel de datos GPS -->
+  <div id="panelGPS">
+    <div class="dato">
+      <label>Velocidad</label>
+      <span id="velTexto">0 km/h</span>
+    </div>
+    <div class="dato">
+      <label>Distancia</label>
+      <span id="distTexto">0 m</span>
+    </div>
+    <div class="dato">
+      <label>Dirección</label>
+      <span id="headTexto">0°</span>
+    </div>
+    <div class="dato">
+      <label>Señal GPS</label>
+      <span id="precTexto">--</span>
+    </div>
+  </div>
+
+  <!-- Botones manuales -->
+  <div class="titulo-seccion">Control manual</div>
+  <div class="grid-flechas">
+    <div class="vacio"></div>
+    <button class="btn-flecha" onclick="enviar('N')"  id="btn_N"  disabled>⬆️</button>
+    <div class="vacio"></div>
+
+    <button class="btn-flecha" onclick="enviar('O')"  id="btn_O"  disabled>⬅️</button>
+    <button class="btn-flecha" onclick="enviar('NE')" id="btn_NE" disabled>↗️</button>
+    <button class="btn-flecha" onclick="enviar('E')"  id="btn_E"  disabled>➡️</button>
+
+    <div class="vacio"></div>
+    <button class="btn-flecha" onclick="enviar('SE')" id="btn_SE" disabled>↙️</button>
+    <div class="vacio"></div>
+
+    <div class="vacio"></div>
+    <button class="btn-flecha" onclick="enviar('S')"  id="btn_S"  disabled>🔄</button>
+    <div class="vacio"></div>
+  </div>
+
+<script>
+  // ─── BLE ────────────────────────────────────
+  const SERVICE_UUID        = '12345678-1234-1234-1234-123456789abc';
+  const CHARACTERISTIC_UUID = 'abcd1234-ab12-ab12-ab12-abcdef123456';
+  const BOTONES = ['N','NE','E','SE','S','O'];
+
+  let device, characteristic;
+  let gpsActivo   = false;
+  let watchId     = null;
+  let distTotal   = 0;
+  let lastLat     = null;
+  let lastLon     = null;
+  let intervalBLE = null;
+  let ultimoGPS   = { vel: 0, dist: 0, ang: 0 };
+
+  function setEstado(texto, tipo) {
+    const el = document.getElementById('estado');
+    el.textContent = texto;
+    el.className = tipo || '';
+  }
+
+  function setBotones(habilitado) {
+    BOTONES.forEach(id => {
+      document.getElementById('btn_' + id).disabled = !habilitado;
+    });
+    document.getElementById('btnGPS').disabled = !habilitado;
+  }
+
+  async function conectar() {
+    if (device && device.gatt.connected) {
+      detenerGPS();
+      device.gatt.disconnect();
+      setEstado('Desconectado');
+      document.getElementById('btnConectar').className = '';
+      document.getElementById('btnConectar').textContent = 'Conectar BLE';
+      setBotones(false);
+      return;
+    }
+    try {
+      setEstado('Buscando BEELINE-ESP32...');
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ name: 'BEELINE-ESP32' }],
+        optionalServices: [SERVICE_UUID]
+      });
+      device.addEventListener('gattserverdisconnected', () => {
+        detenerGPS();
+        setEstado('Desconectado');
+        document.getElementById('btnConectar').className = '';
+        document.getElementById('btnConectar').textContent = 'Conectar BLE';
+        setBotones(false);
+      });
+      const server  = await device.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+      characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+      setEstado('✅ Conectado a BEELINE-ESP32', 'conectado');
+      document.getElementById('btnConectar').className = 'conectado';
+      document.getElementById('btnConectar').textContent = 'Desconectar';
+      setBotones(true);
+    } catch(e) {
+      setEstado('Error: ' + e.message, 'error');
+    }
+  }
+
+  async function enviar(comando) {
+    if (!characteristic) return;
+    try {
+      await characteristic.writeValue(new TextEncoder().encode(comando));
+    } catch(e) {
+      console.error('Error BLE:', e);
+    }
+  }
+
+  // ─── GPS ─────────────────────────────────────
+  function toggleGPS() {
+    if (gpsActivo) {
+      detenerGPS();
+    } else {
+      iniciarGPS();
+    }
+  }
+
+  function iniciarGPS() {
+    if (!navigator.geolocation) {
+      setEstado('GPS no disponible', 'error');
+      return;
+    }
+    document.getElementById('panelGPS').className = 'visible';
+    document.getElementById('btnGPS').className = 'activo';
+    document.getElementById('btnGPS').textContent = '🛑 Detener GPS';
+    gpsActivo = true;
+    distTotal = 0;
+    lastLat   = null;
+    lastLon   = null;
+
+    watchId = navigator.geolocation.watchPosition(
+      onGPS,
+      onGPSError,
+      {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 10000
+      }
+    );
+
+    // Enviar datos BLE cada 1.5 segundos
+    intervalBLE = setInterval(() => {
+      const cmd = `GPS:${ultimoGPS.vel}:${ultimoGPS.dist}:${ultimoGPS.ang}`;
+      enviar(cmd);
+    }, 1500);
+  }
+
+  function detenerGPS() {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+    if (intervalBLE !== null) {
+      clearInterval(intervalBLE);
+      intervalBLE = null;
+    }
+    gpsActivo = false;
+    document.getElementById('btnGPS').className = '';
+    document.getElementById('btnGPS').textContent = '📍 Activar GPS';
+    document.getElementById('panelGPS').className = '';
+  }
+
+  function onGPS(pos) {
+    const lat  = pos.coords.latitude;
+    const lon  = pos.coords.longitude;
+    const vel  = pos.coords.speed
+                   ? (pos.coords.speed * 3.6).toFixed(1)  // m/s → km/h
+                   : 0;
+    const prec = pos.coords.accuracy
+                   ? pos.coords.accuracy.toFixed(0) + 'm'
+                   : '--';
+
+    // Calcular distancia acumulada
+    if (lastLat !== null) {
+      distTotal += calcularDistancia(lastLat, lastLon, lat, lon);
+    }
+    lastLat = lat;
+    lastLon = lon;
+
+    // Calcular heading entre puntos si no viene del GPS
+    let ang = pos.coords.heading || 0;
+    if (!pos.coords.heading && lastLat !== null) {
+      ang = calcularHeading(lastLat, lastLon, lat, lon);
+    }
+
+    // Actualizar panel en pantalla del celular
+    document.getElementById('velTexto').textContent  = vel + ' km/h';
+    document.getElementById('headTexto').textContent = Math.round(ang) + '°';
+    document.getElementById('precTexto').textContent = prec;
+
+    const distKm = distTotal / 1000;
+    if (distTotal < 1000) {
+      document.getElementById('distTexto').textContent =
+        Math.round(distTotal) + ' m';
+    } else {
+      document.getElementById('distTexto').textContent =
+        distKm.toFixed(2) + ' km';
+    }
+
+    // Guardar para envío BLE
+    ultimoGPS = {
+      vel:  parseFloat(vel),
+      dist: distKm,
+      ang:  Math.round(ang)
+    };
+  }
+
+  function onGPSError(err) {
+    setEstado('Error GPS: ' + err.message, 'error');
+  }
+
+  // ─── Cálculos geográficos ─────────────────────
+
+  // Distancia entre dos puntos GPS en metros (Haversine)
+  function calcularDistancia(lat1, lon1, lat2, lon2) {
+    const R = 6371000; // Radio tierra en metros
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) *
+              Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  // Ángulo de movimiento entre dos puntos
+  function calcularHeading(lat1, lon1, lat2, lon2) {
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+    const x = Math.cos(lat1 * Math.PI / 180) *
+               Math.sin(lat2 * Math.PI / 180) -
+               Math.sin(lat1 * Math.PI / 180) *
+               Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+    return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
+  }
+</script>
+</body>
+</html>
